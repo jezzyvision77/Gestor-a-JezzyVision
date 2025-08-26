@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gestor de Clientes de Edición</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #f4f7f9; color: #333; margin: 0; padding: 20px; display: flex; justify-content: center; }
+        .container { width: 100%; max-width: 1200px; background: #fff; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+        header { background-color: #4a90e2; color: white; padding: 20px; border-radius: 10px 10px 0 0; text-align: center; }
+        header h1 { margin: 0; }
+        .auth-section { padding: 20px; text-align: center; }
+        .auth-section button { font-size: 16px; padding: 12px 24px; cursor: pointer; border: none; background-color: #5cb85c; color: white; border-radius: 5px; }
+        .auth-section button:hover { background-color: #4cae4c; }
+        #userInfo { font-weight: bold; margin-top: 10px; }
+        main { display: none; padding: 20px; grid-template-columns: 300px 1fr; gap: 20px; }
+        #clientListContainer, #clientDetailContainer { background: #fdfdfd; padding: 20px; border-radius: 8px; border: 1px solid #e0e0e0; }
+        h2 { border-bottom: 2px solid #4a90e2; padding-bottom: 10px; color: #333; }
+        #clientList { list-style: none; padding: 0; max-height: 60vh; overflow-y: auto; }
+        #clientList li { padding: 15px; border-bottom: 1px solid #eee; cursor: pointer; transition: background-color 0.2s; }
+        #clientList li:hover { background-color: #e9f2fa; }
+        .client-actions { margin-top: 15px; }
+        .client-actions input { width: calc(100% - 22px); padding: 10px; border: 1px solid #ccc; border-radius: 5px; }
+        .client-actions button { width: 100%; padding: 10px; margin-top: 10px; background-color: #4a90e2; color: white; border: none; border-radius: 5px; cursor: pointer; }
+        #clientDetail h3 { color: #4a90e2; }
+        #fileList { list-style: none; padding: 0; }
+        #fileList li { background: #f0f0f0; padding: 10px; border-radius: 5px; margin-bottom: 5px; display: flex; justify-content: space-between; align-items: center; }
+        #fileList a { text-decoration: none; color: #333; }
+        #instructions { width: 100%; height: 150px; padding: 10px; border-radius: 5px; border: 1px solid #ccc; margin-top: 10px; }
+        .loader { border: 4px solid #f3f3f3; border-top: 4px solid #4a90e2; border-radius: 50%; width: 24px; height: 24px; animation: spin 1s linear infinite; margin: 20px auto; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <header>
+            <h1>Gestor de Clientes de Edición de Video</h1>
+        </header>
+
+        <section id="authSection" class="auth-section">
+            <p>Para empezar, necesitas autorizar el acceso a Google Drive.</p>
+            <button id="authorize_button">Conectar con Google Drive</button>
+            <button id="signout_button" style="display: none;">Cerrar Sesión</button>
+            <div id="userInfo"></div>
+        </section>
+
+        <main id="mainApp">
+            <aside id="clientListContainer">
+                <h2>Clientes</h2>
+                <div id="clientListLoader" class="loader" style="display: none;"></div>
+                <ul id="clientList"></ul>
+                <div class="client-actions">
+                    <input type="text" id="newClientName" placeholder="Nombre del nuevo cliente">
+                    <button id="addClientBtn">Crear Nuevo Cliente</button>
+                </div>
+            </aside>
+            <section id="clientDetailContainer">
+                <div id="clientDetail">
+                    <h2>Detalles del Cliente</h2>
+                    <div id="welcomeMessage">Selecciona un cliente de la lista para ver sus archivos e instrucciones.</div>
+                    <div id="clientContent" style="display: none;">
+                        <h3 id="selectedClientName"></h3>
+                        <h4>Archivos y Recursos</h4>
+                        <div id="fileListLoader" class="loader" style="display: none;"></div>
+                        <ul id="fileList"></ul>
+                        <input type="file" id="fileUploader" style="margin-top: 15px;">
+                        <button id="uploadBtn">Subir Archivo</button>
+                        <hr style="margin: 20px 0;">
+                        <h4>Instrucciones del Proyecto</h4>
+                        <div id="instructionsLoader" class="loader" style="display: none;"></div>
+                        <textarea id="instructions"></textarea>
+                        <button id="saveInstructionsBtn" style="margin-top: 10px;">Guardar Instrucciones</button>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="https://apis.google.com/js/api.js"></script>
+    <script src="https://accounts.google.com/gsi/client"></script>
+    <script>
+    // =========================================================================================
+    // PASO 1: CONFIGURACIÓN - ¡REEMPLAZA ESTOS VALORES!
+    // =========================================================================================
+    const CLIENT_ID = 'https://github.com/jezzyvision77/Gestor-a-JezzyVision.git'; // <-- Pega tu Client ID aquí
+    const API_KEY = 'AIzaSyAS5k4LBvVKcYbzCu6elhZCP34q4xKmVYg';                                    // <-- Pega tu API Key aquí
+    const PARENT_FOLDER_ID = '1RmjZjL26MEsrA5BSJVOOGwdRbmMvHtg5';           // <-- Pega el ID de tu carpeta "Clientes" aquí
+
+    // El SCOPE define qué permisos pedimos. 'drive.file' es un buen balance de seguridad.
+    const SCOPES = 'https://www.googleapis.com/auth/drive';
+    // =========================================================================================
+
+    let tokenClient;
+    let gapiInited = false;
+    let gisInited = false;
+    let currentClientId = null;
+    let instructionsFileId = null;
+
+    const authBtn = document.getElementById('authorize_button');
+    const signoutBtn = document.getElementById('signout_button');
+    const mainApp = document.getElementById('mainApp');
+    const addClientBtn = document.getElementById('addClientBtn');
+    const clientList = document.getElementById('clientList');
+    const fileUploader = document.getElementById('fileUploader');
+    const uploadBtn = document.getElementById('uploadBtn');
+    const saveInstructionsBtn = document.getElementById('saveInstructionsBtn');
+    
+    // --- INICIALIZACIÓN ---
+    window.onload = () => {
+        gapi.load('client', initializeGapiClient);
+        tokenClient = google.accounts.oauth2.initTokenClient({
+            client_id: CLIENT_ID,
+            scope: SCOPES,
+            callback: handleAuthCallback,
+        });
+    };
+    
+    async function initializeGapiClient() {
+        await gapi.client.init({
+            apiKey: API_KEY,
+            discoveryDocs: ["https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"],
+        });
+        gapiInited = true;
+        maybeEnableButtons();
+    }
+
+    // --- AUTENTICACIÓN ---
+    authBtn.onclick = () => tokenClient.requestAccessToken({ prompt: 'consent' });
+    signoutBtn.onclick = () => {
+        gapi.client.setToken('');
+        updateUi(false);
+    };
+
+    function handleAuthCallback(resp) {
+        if (resp.error) throw new Error(resp.error);
+        gapi.client.setToken(resp);
+        updateUi(true);
+        loadUserProfile();
+    }
+
+    async function loadUserProfile() {
+        try {
+            const res = await gapi.client.drive.about.get({ fields: 'user' });
+            document.getElementById('userInfo').innerText = `Conectado como: ${res.result.user.emailAddress}`;
+        } catch (err) {
+            console.error(err);
+        }
+    }
+
+    function updateUi(isAuthorized) {
+        authBtn.style.display = isAuthorized ? 'none' : 'block';
+        signoutBtn.style.display = isAuthorized ? 'block' : 'none';
+        mainApp.style.display = isAuthorized ? 'grid' : 'none';
+        if (isAuthorized) {
+            loadClients();
+        } else {
+            document.getElementById('userInfo').innerText = '';
+            clientList.innerHTML = '';
+            document.getElementById('clientContent').style.display = 'none';
+            document.getElementById('welcomeMessage').style.display = 'block';
+        }
+    }
+    
+    // --- GESTIÓN DE CLIENTES ---
+    addClientBtn.onclick = async () => {
+        const clientName = document.getElementById('newClientName').value.trim();
+        if (!clientName) {
+            alert('Por favor, introduce un nombre para el cliente.');
+            return;
+        }
+        try {
+            const fileMetadata = {
+                name: clientName,
+                mimeType: 'application/vnd.google-apps.folder',
+                parents: [PARENT_FOLDER_ID],
+            };
+            const res = await gapi.client.drive.files.create({ resource: fileMetadata, fields: 'id, name' });
+            alert(`Cliente "${res.result.name}" creado con éxito.`);
+            document.getElementById('newClientName').value = '';
+            loadClients();
+        } catch (err) {
+            console.error('Error creando cliente:', err);
+            alert('Hubo un error al crear el cliente.');
+        }
+    };
+    
+    async function loadClients() {
+        setLoaderState('clientListLoader', true);
+        clientList.innerHTML = '';
+        try {
+            const res = await gapi.client.drive.files.list({
+                q: `'${PARENT_FOLDER_ID}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+                fields: 'files(id, name)',
+                orderBy: 'name',
+            });
+            const folders = res.result.files;
+            if (folders && folders.length > 0) {
+                folders.forEach(folder => {
+                    const li = document.createElement('li');
+                    li.textContent = folder.name;
+                    li.dataset.id = folder.id;
+                    li.onclick = () => selectClient(folder.id, folder.name);
+                    clientList.appendChild(li);
+                });
+            } else {
+                clientList.innerHTML = '<li>No hay clientes todavía.</li>';
+            }
+        } catch (err) {
+            console.error('Error cargando clientes:', err);
+            clientList.innerHTML = '<li>Error al cargar clientes.</li>';
+        }
+        setLoaderState('clientListLoader', false);
+    }
+
+    function selectClient(clientId, clientName) {
+        currentClientId = clientId;
+        document.getElementById('welcomeMessage').style.display = 'none';
+        document.getElementById('clientContent').style.display = 'block';
+        document.getElementById('selectedClientName').textContent = clientName;
+        loadFilesForClient(clientId);
+        loadInstructions(clientId);
+    }
+    
+    // --- GESTIÓN DE ARCHIVOS E INSTRUCCIONES ---
+    async function loadFilesForClient(clientId) {
+        setLoaderState('fileListLoader', true);
+        const fileListEl = document.getElementById('fileList');
+        fileListEl.innerHTML = '';
+        try {
+            const res = await gapi.client.drive.files.list({
+                q: `'${clientId}' in parents and name != 'instrucciones.txt' and trashed=false`,
+                fields: 'files(id, name, webViewLink)',
+            });
+            const files = res.result.files;
+            if (files && files.length > 0) {
+                files.forEach(file => {
+                    const li = document.createElement('li');
+                    li.innerHTML = `<a href="${file.webViewLink}" target="_blank">${file.name}</a>`;
+                    fileListEl.appendChild(li);
+                });
+            } else {
+                fileListEl.innerHTML = '<li>No hay archivos para este cliente.</li>';
+            }
+        } catch (err) {
+            console.error('Error cargando archivos:', err);
+        }
+        setLoaderState('fileListLoader', false);
+    }
+
+    uploadBtn.onclick = () => {
+        if (!currentClientId) {
+            alert('Selecciona un cliente primero.');
+            return;
+        }
+        const file = fileUploader.files[0];
+        if (!file) {
+            alert('Selecciona un archivo para subir.');
+            return;
+        }
+        uploadFile(file, currentClientId);
+    };
+
+    async function uploadFile(file, parentId) {
+        alert('Subiendo archivo... Esto puede tardar. Por favor, espera la confirmación.');
+        try {
+            const metadata = { name: file.name, parents: [parentId] };
+            const form = new FormData();
+            form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+            form.append('file', file);
+            
+            const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+                method: 'POST',
+                headers: new Headers({ 'Authorization': 'Bearer ' + gapi.client.getToken().access_token }),
+                body: form,
+            });
+            const result = await res.json();
+            alert(`Archivo "${result.name}" subido con éxito.`);
+            fileUploader.value = '';
+            loadFilesForClient(parentId);
+        } catch (err) {
+            console.error('Error al subir archivo:', err);
+            alert('Hubo un error al subir el archivo.');
+        }
+    }
+    
+    async function loadInstructions(clientId) {
+        setLoaderState('instructionsLoader', true);
+        const instructionsTextarea = document.getElementById('instructions');
+        instructionsTextarea.value = '';
+        instructionsFileId = null;
+        try {
+            // Buscar si ya existe el archivo de instrucciones
+            const res = await gapi.client.drive.files.list({
+                q: `'${clientId}' in parents and name='instrucciones.txt' and trashed=false`,
+                fields: 'files(id)',
+            });
+            if (res.result.files && res.result.files.length > 0) {
+                instructionsFileId = res.result.files[0].id;
+                // Si existe, descargar su contenido
+                const contentRes = await gapi.client.drive.files.get({
+                    fileId: instructionsFileId,
+                    alt: 'media',
+                });
+                instructionsTextarea.value = contentRes.body;
+            }
+        } catch (err) {
+            console.error('Error cargando instrucciones:', err);
+        }
+        setLoaderState('instructionsLoader', false);
+    }
+    
+    saveInstructionsBtn.onclick = async () => {
+        if (!currentClientId) return;
+        setLoaderState('instructionsLoader', true);
+        const instructionsContent = document.getElementById('instructions').value;
+        const blob = new Blob([instructionsContent], { type: 'text/plain' });
+        
+        let path, method;
+        if (instructionsFileId) { // Si el archivo ya existe, lo actualizamos
+            path = `/upload/drive/v3/files/${instructionsFileId}?uploadType=media`;
+            method = 'PATCH';
+        } else { // Si no existe, lo creamos
+            path = '/upload/drive/v3/files?uploadType=media';
+            method = 'POST';
+        }
+        
+        const fileMetadata = { name: 'instrucciones.txt', mimeType: 'text/plain', parents: [instructionsFileId ? null : currentClientId] };
+
+        try {
+            // Para crear un archivo, primero creamos la metadata y luego subimos el contenido
+            if (!instructionsFileId) {
+                 const createRes = await gapi.client.drive.files.create({
+                    resource: { name: 'instrucciones.txt', parents: [currentClientId] },
+                    fields: 'id'
+                 });
+                 instructionsFileId = createRes.result.id;
+            }
+
+            // Ahora actualizamos el contenido
+            await fetch(`https://www.googleapis.com/upload/drive/v3/files/${instructionsFileId}?uploadType=media`, {
+                method: 'PATCH',
+                headers: new Headers({ 'Authorization': 'Bearer ' + gapi.client.getToken().access_token }),
+                body: blob
+            });
+            alert('Instrucciones guardadas con éxito.');
+
+        } catch(err) {
+             console.error('Error guardando instrucciones:', err);
+             alert('Hubo un error al guardar las instrucciones.');
+        }
+        setLoaderState('instructionsLoader', false);
+    };
+
+    function setLoaderState(loaderId, isLoading) {
+        document.getElementById(loaderId).style.display = isLoading ? 'block' : 'none';
+    }
+
+    </script>
+</body>
+</html>
